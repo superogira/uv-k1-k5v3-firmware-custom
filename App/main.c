@@ -72,19 +72,6 @@ void _putchar(__attribute__((unused)) char c)
 
 void Main(void)
 {
-    // Enable clock gating of blocks we need
-    SYSCON_DEV_CLK_GATE = 0
-        | SYSCON_DEV_CLK_GATE_GPIOA_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_GPIOB_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_GPIOC_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_UART1_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_SPI0_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_SARADC_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_CRC_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_AES_BITS_ENABLE
-        | SYSCON_DEV_CLK_GATE_PWM_PLUS0_BITS_ENABLE;
-
-
     SYSTICK_Init();
     BOARD_Init();
 

@@ -47,14 +47,10 @@ typedef enum BEEP_Type_t BEEP_Type_t;
 extern BEEP_Type_t       gBeepToPlay;
 
 void AUDIO_PlayBeep(BEEP_Type_t Beep);
-    
-static inline void AUDIO_AudioPathOn(void) {
-    GPIO_SetBit(&GPIOC->DATA, GPIOC_PIN_AUDIO_PATH);
-}
 
-static inline void AUDIO_AudioPathOff(void) {
-    GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_AUDIO_PATH);
-}
+#define AUDIO_AudioPathOn() GPIO_EnableAudioPath()
+
+#define AUDIO_AudioPathOff() GPIO_DisableAudioPath()
 
 #ifdef ENABLE_VOICE
     typedef enum VOICE_ID_t  VOICE_ID_t;

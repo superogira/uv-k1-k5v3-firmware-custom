@@ -27,18 +27,18 @@ KEY_Code_t gKeyReading1     = KEY_INVALID;
 uint16_t   gDebounceCounter = 0;
 bool       gWasFKeyPressed  = false;
 
-#define PIN_MASK(n) GPIO_PIN_MASK(GPIOB_PIN_KEYBOARD_##n)
+#define GPIOx               GPIOB
+#define PIN_MASK_COLS       (LL_GPIO_PIN_6 | LL_GPIO_PIN_5 | LL_GPIO_PIN_4 | LL_GPIO_PIN_3)
+#define PIN_COLS            GPIO_MAKE_PIN(GPIOx, PIN_MASK_COLS)
+#define PIN_COL(n)          GPIO_MAKE_PIN(GPIOx, 1u << (6 - (n)))
 
-static const uint16_t pin_masks[] = {
-    PIN_MASK(0),
-    PIN_MASK(1),
-    PIN_MASK(2),
-    PIN_MASK(3),
-    PIN_MASK(4),
-    PIN_MASK(5),
-    PIN_MASK(6),
-    PIN_MASK(7),
-};
+#define PIN_MASK_ROWS       (LL_GPIO_PIN_15 | LL_GPIO_PIN_14 | LL_GPIO_PIN_13 | LL_GPIO_PIN_12)
+#define PIN_MASK_ROW(n)     (1u << (15 - (n)))
+
+static inline uint32_t read_rows()
+{
+    return PIN_MASK_ROWS & LL_GPIO_ReadInputPort(GPIOx);
+}
 
 static const KEY_Code_t keyboard[5][4] = {
     {   // Zero col
@@ -76,21 +76,6 @@ static const KEY_Code_t keyboard[5][4] = {
     }
 };
 
-static inline void set_cols()
-{
-    LL_GPIO_SetOutputPin(GPIOB, pin_masks[4] | pin_masks[5] | pin_masks[6] | pin_masks[7]);
-}
-
-static inline void reset_col(uint32_t index)
-{
-    LL_GPIO_ResetOutputPin(GPIOB, pin_masks[index + 4]);
-}
-
-static inline uint32_t read_rows()
-{
-    return LL_GPIO_ReadInputPort(GPIOB);
-}
-
 KEY_Code_t KEYBOARD_Poll(void)
 {
     KEY_Code_t Key = KEY_INVALID;
@@ -102,22 +87,22 @@ KEY_Code_t KEYBOARD_Poll(void)
 
     for (unsigned int j = 0; j < 5; j++)
     {
-        uint16_t reg;
+        uint32_t reg;
         unsigned int i;
         unsigned int k;
 
         // Set all high
-        set_cols();
+        GPIO_SetOutputPin(PIN_COLS);
 
         // Clear the pin we are selecting
         if (j > 0)
-            reset_col(j - 1);
+            GPIO_ResetOutputPin(PIN_COL(j - 1));
 
         // Read all 4 GPIO pins at once .. with de-noise, max of 8 sample loops
         for (i = 0, k = 0, reg = 0; i < 3 && k < 8; i++, k++)
         {
             SYSTICK_DelayUs(1);
-            uint16_t reg2 = (uint16_t) read_rows();
+            uint32_t reg2 = read_rows();
             i *= reg == reg2;
             reg = reg2;
         }
@@ -127,8 +112,7 @@ KEY_Code_t KEYBOARD_Poll(void)
 
         for (unsigned int i = 0; i < 4; i++)
         {
-            const uint16_t mask = pin_masks[i];
-            if (!(reg & mask))
+            if (!(reg & PIN_MASK_ROW(i)))
             {
                 Key = keyboard[j][i];
                 break;

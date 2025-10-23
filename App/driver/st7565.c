@@ -17,33 +17,110 @@
 #include <stdint.h>
 #include <stdio.h>     // NULL
 
-#include "bsp/dp32g030/gpio.h"
-#include "bsp/dp32g030/spi.h"
+#include "py32f071_ll_bus.h"
+#include "py32f071_ll_spi.h"
+#include "py32f071_ll_gpio.h"
 #include "driver/gpio.h"
-#include "driver/spi.h"
 #include "driver/st7565.h"
 #include "driver/system.h"
 #include "misc.h"
 
+#define SPIx SPI1
+
+#define PIN_CS GPIO_MAKE_PIN(GPIOB, LL_GPIO_PIN_2)
+#define PIN_A0 GPIO_MAKE_PIN(GPIOA, LL_GPIO_PIN_6)
+
 uint8_t gStatusLine[LCD_WIDTH];
 uint8_t gFrameBuffer[FRAME_LINES][LCD_WIDTH];
+
+static void SPI_Init()
+{
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_SPI1);
+    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
+
+    do
+    {
+        LL_GPIO_InitTypeDef InitStruct;
+        LL_GPIO_StructInit(&InitStruct);
+        InitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
+        InitStruct.Alternate = LL_GPIO_AF0_SPI1;
+        InitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+        InitStruct.Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH;
+
+        // SCK: PA5
+        InitStruct.Pin = LL_GPIO_PIN_5;
+        InitStruct.Pull = LL_GPIO_PULL_UP;
+        LL_GPIO_Init(GPIOA, &InitStruct);
+
+        // SDA: PA7
+        InitStruct.Pin = LL_GPIO_PIN_7;
+        InitStruct.Pull = LL_GPIO_PULL_NO;
+        LL_GPIO_Init(GPIOA, &InitStruct);
+    } while (0);
+
+    LL_SPI_InitTypeDef InitStruct;
+    LL_SPI_StructInit(&InitStruct);
+    InitStruct.TransferDirection = LL_SPI_FULL_DUPLEX;
+    InitStruct.Mode = LL_SPI_MODE_MASTER;
+    InitStruct.DataWidth = LL_SPI_DATAWIDTH_8BIT;
+    InitStruct.ClockPolarity = LL_SPI_POLARITY_HIGH;
+    InitStruct.ClockPhase = LL_SPI_PHASE_2EDGE;
+    InitStruct.NSS = LL_SPI_NSS_SOFT;
+    InitStruct.BitOrder = LL_SPI_MSB_FIRST;
+    InitStruct.CRCCalculation = LL_SPI_CRCCALCULATION_DISABLE;
+    InitStruct.BaudRate = LL_SPI_BAUDRATEPRESCALER_DIV256;
+    LL_SPI_Init(SPIx, &InitStruct);
+
+    LL_SPI_Enable(SPIx);
+}
+
+static inline void AssertCS()
+{
+    GPIO_ResetOutputPin(PIN_CS);
+}
+
+static inline void ReleaseCS()
+{
+    GPIO_SetOutputPin(PIN_CS);
+}
+
+static inline void SetA0()
+{
+    GPIO_SetOutputPin(PIN_A0);
+}
+
+static inline void ResetA0()
+{
+    GPIO_ResetOutputPin(PIN_A0);
+}
+
+static uint8_t SPI_WriteByte(uint8_t Value)
+{
+    while (!LL_SPI_IsActiveFlag_TXE(SPIx))
+        ;
+
+    LL_SPI_TransmitData8(SPIx, Value);
+
+    while (!LL_SPI_IsActiveFlag_RXNE(SPIx))
+        ;
+
+    return LL_SPI_ReceiveData8(SPIx);
+}
 
 static void DrawLine(uint8_t column, uint8_t line, const uint8_t * lineBuffer, unsigned size_defVal)
 {   
     ST7565_SelectColumnAndLine(column + 4, line);
-    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_ST7565_A0);
+    SetA0();
     for (unsigned i = 0; i < size_defVal; i++) {
-        while ((SPI0->FIFOST & SPI_FIFOST_TFF_MASK) != SPI_FIFOST_TFF_BITS_NOT_FULL) {}
-        SPI0->WDR = lineBuffer ? lineBuffer[i] : size_defVal;
+        SPI_WriteByte(lineBuffer ? lineBuffer[i] : size_defVal);
     }
-    SPI_WaitForUndocumentedTxFifoStatusBit();
 }
 
 void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const uint8_t *pBitmap, const unsigned int Size)
 {
-    SPI_ToggleMasterMode(&SPI0->CR, false);
+    AssertCS();
     DrawLine(Column, Line, pBitmap, Size);
-    SPI_ToggleMasterMode(&SPI0->CR, true);
+    ReleaseCS();
 }
 
 
@@ -57,7 +134,7 @@ void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const u
 
     static void ST7565_BlitScreen(uint8_t line)
     {
-        SPI_ToggleMasterMode(&SPI0->CR, false);
+        AssertCS();
         ST7565_WriteByte(0x40);
 
         if(line == 0)
@@ -75,7 +152,7 @@ void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const u
             }
         }
 
-        SPI_ToggleMasterMode(&SPI0->CR, true);
+        ReleaseCS();
     }
 
     void ST7565_BlitFullScreen(void)
@@ -95,38 +172,38 @@ void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const u
 #else
     void ST7565_BlitFullScreen(void)
     {
-        SPI_ToggleMasterMode(&SPI0->CR, false);
+        AssertCS();
         ST7565_WriteByte(0x40);
         for (unsigned line = 0; line < FRAME_LINES; line++) {
             DrawLine(0, line+1, gFrameBuffer[line], LCD_WIDTH);
         }
-        SPI_ToggleMasterMode(&SPI0->CR, true);
+        ReleaseCS();
     }
 
     void ST7565_BlitLine(unsigned line)
     {
-        SPI_ToggleMasterMode(&SPI0->CR, false);
+        AssertCS();
         ST7565_WriteByte(0x40);    // start line ?
         DrawLine(0, line+1, gFrameBuffer[line], LCD_WIDTH);
-        SPI_ToggleMasterMode(&SPI0->CR, true);
+        ReleaseCS();
     }
 
     void ST7565_BlitStatusLine(void)
     {   // the top small text line on the display
-        SPI_ToggleMasterMode(&SPI0->CR, false);
+        AssertCS();
         ST7565_WriteByte(0x40);    // start line ?
         DrawLine(0, 0, gStatusLine, LCD_WIDTH);
-        SPI_ToggleMasterMode(&SPI0->CR, true);
+        ReleaseCS();
     }
 #endif
 
 void ST7565_FillScreen(uint8_t value)
 {
-    SPI_ToggleMasterMode(&SPI0->CR, false);
+    AssertCS();
     for (unsigned i = 0; i < 8; i++) {
         DrawLine(0, i, NULL, value);
     }
-    SPI_ToggleMasterMode(&SPI0->CR, true);
+    ReleaseCS();
 }
 
 // Software reset
@@ -212,13 +289,15 @@ uint8_t cmds[] = {
     #if defined(ENABLE_FEAT_F4HWN_CTR) || defined(ENABLE_FEAT_F4HWN_INV)
     void ST7565_ContrastAndInv(void)
     {
-        SPI_ToggleMasterMode(&SPI0->CR, false);
+        AssertCS();
         ST7565_WriteByte(ST7565_CMD_SOFTWARE_RESET);   // software reset
 
         for(uint8_t i = 0; i < 8; i++)
         {
             ST7565_Cmd(i);
         }
+
+        // TODO: Release CS??
     }
     #endif
 
@@ -246,9 +325,9 @@ uint8_t cmds[] = {
     
 void ST7565_Init(void)
 {
-    SPI0_Init();
+    SPI_Init();
     ST7565_HardwareReset();
-    SPI_ToggleMasterMode(&SPI0->CR, false);
+    AssertCS();
     ST7565_WriteByte(ST7565_CMD_SOFTWARE_RESET);   // software reset
     SYSTEM_DelayMs(120);
 
@@ -273,8 +352,8 @@ void ST7565_Init(void)
     
     ST7565_WriteByte(ST7565_CMD_SET_START_LINE | 0);   // line 0
     ST7565_WriteByte(ST7565_CMD_DISPLAY_ON_OFF | 1);   // D=1
-    SPI_WaitForUndocumentedTxFifoStatusBit();
-    SPI_ToggleMasterMode(&SPI0->CR, true);
+
+    ReleaseCS();
 
     ST7565_FillScreen(0x00);
 }
@@ -282,52 +361,43 @@ void ST7565_Init(void)
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
     void ST7565_ShutDown(void)
     {
-        SPI_ToggleMasterMode(&SPI0->CR, false);
+        AssertCS();
         ST7565_WriteByte(ST7565_CMD_POWER_CIRCUIT | 0b000);   // VB=0 VR=1 VF=1
         ST7565_WriteByte(ST7565_CMD_SET_START_LINE | 0);   // line 0
         ST7565_WriteByte(ST7565_CMD_DISPLAY_ON_OFF | 0);   // D=1
-        SPI_ToggleMasterMode(&SPI0->CR, true);
+        ReleaseCS();
     }
 #endif
 
 void ST7565_FixInterfGlitch(void)
 {
-    SPI_ToggleMasterMode(&SPI0->CR, false);
+    AssertCS();
     for(uint8_t i = 0; i < ARRAY_SIZE(cmds); i++)
 #ifdef ENABLE_FEAT_F4HWN
         ST7565_Cmd(i);
 #else
         ST7565_WriteByte(cmds[i]);
 #endif
-    SPI_WaitForUndocumentedTxFifoStatusBit();
-    SPI_ToggleMasterMode(&SPI0->CR, true);
+
+    ReleaseCS();
 }
 
 void ST7565_HardwareReset(void)
 {
-    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_ST7565_RES);
-    SYSTEM_DelayMs(1);
-    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_ST7565_RES);
-    SYSTEM_DelayMs(20);
-    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_ST7565_RES);
-    SYSTEM_DelayMs(120);
+    // Not supported on K1
+    // TODO: Delete this function
 }
 
 void ST7565_SelectColumnAndLine(uint8_t Column, uint8_t Line)
 {
-    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_ST7565_A0);
-    while ((SPI0->FIFOST & SPI_FIFOST_TFF_MASK) != SPI_FIFOST_TFF_BITS_NOT_FULL) {}
-    SPI0->WDR = Line + 176;
-    while ((SPI0->FIFOST & SPI_FIFOST_TFF_MASK) != SPI_FIFOST_TFF_BITS_NOT_FULL) {}
-    SPI0->WDR = ((Column >> 4) & 0x0F) | 0x10;
-    while ((SPI0->FIFOST & SPI_FIFOST_TFF_MASK) != SPI_FIFOST_TFF_BITS_NOT_FULL) {}
-    SPI0->WDR = ((Column >> 0) & 0x0F);
-    SPI_WaitForUndocumentedTxFifoStatusBit();
+    ResetA0();
+    SPI_WriteByte(Line + 176);
+    SPI_WriteByte(((Column >> 4) & 0x0F) | 0x10);
+    SPI_WriteByte((Column >> 0) & 0x0F);
 }
 
 void ST7565_WriteByte(uint8_t Value)
 {
-    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_ST7565_A0);
-    while ((SPI0->FIFOST & SPI_FIFOST_TFF_MASK) != SPI_FIFOST_TFF_BITS_NOT_FULL) {}
-    SPI0->WDR = Value;
+    ResetA0();
+    SPI_WriteByte(Value);
 }

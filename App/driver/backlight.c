@@ -15,9 +15,9 @@
  */
 
 #include "backlight.h"
-#include "bsp/dp32g030/gpio.h"
-#include "bsp/dp32g030/pwmplus.h"
-#include "bsp/dp32g030/portcon.h"
+// #include "bsp/dp32g030/gpio.h"
+// #include "bsp/dp32g030/pwmplus.h"
+// #include "bsp/dp32g030/portcon.h"
 #include "driver/gpio.h"
 #include "settings.h"
 
@@ -40,7 +40,7 @@ bool backlightOn;
 #endif
 
 void BACKLIGHT_InitHardware()
-{
+{/*
     // 48MHz / 94 / 1024 ~ 500Hz
     const uint32_t PWM_FREQUENCY_HZ =  25000;
     PWM_PLUS0_CLKSRC |= ((48000000 / 1024 / PWM_FREQUENCY_HZ) << 16);
@@ -64,6 +64,7 @@ void BACKLIGHT_InitHardware()
         PWMPLUS_CFG_CNT_REP_BITS_ENABLE |
         PWMPLUS_CFG_COUNTER_EN_BITS_ENABLE |
         0;
+    */
 }
 
 static void BACKLIGHT_Sound(void)
@@ -162,7 +163,9 @@ static uint8_t currentBrightness;
 void BACKLIGHT_SetBrightness(uint8_t brigtness)
 {
     currentBrightness = brigtness;
+    /*
     PWM_PLUS0_CH0_COMP = value[brigtness] * 4;
+    */
     //PWM_PLUS0_CH0_COMP = (1 << brigtness) - 1;
     //PWM_PLUS0_SWLOAD = 1;
 }

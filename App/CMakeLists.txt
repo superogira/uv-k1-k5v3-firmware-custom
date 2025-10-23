@@ -106,7 +106,7 @@ enable_feature(ENABLE_AIRCOPY
     ui/aircopy.c
 )
 enable_feature(ENABLE_NOAA)
-enable_feature(ENABLE_VOICE)
+# enable_feature(ENABLE_VOICE)
 enable_feature(ENABLE_VOX)
 enable_feature(ENABLE_ALARM)
 enable_feature(ENABLE_TX1750)
