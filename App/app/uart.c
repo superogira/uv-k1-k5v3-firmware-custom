@@ -328,7 +328,10 @@ static void CMD_051D(const uint8_t *pBuffer)
                     bReloadEeprom = true;
 
             if ((Offset < 0x0E98 || Offset >= 0x0EA0) || !bIsInLockScreen || pCmd->bAllowPassword)
-                EEPROM_WriteBuffer(Offset, &pCmd->Data[i * 8U]);
+            {    
+                // EEPROM_WriteBuffer(Offset, &pCmd->Data[i * 8U]);
+                // TODO: To be implemented
+            }
         }
 
         if (bReloadEeprom)

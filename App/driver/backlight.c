@@ -81,6 +81,9 @@ static void BACKLIGHT_Sound(void)
 
 void BACKLIGHT_TurnOn(void)
 {
+    // TODO: This is temporary. Will delete
+    GPIO_TurnOnBacklight();
+
     #ifdef ENABLE_FEAT_F4HWN_SLEEP
         gSleepModeCountdown_500ms = gSetting_set_off * 120;
     #endif

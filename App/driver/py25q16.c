@@ -1,5 +1,5 @@
-/* Copyright 2023 Dual Tachyon
- * https://github.com/DualTachyon
+/* Copyright 2025 muzkr
+ * https://github.com/muzkr
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include "py32f071_ll_spi.h"
 #include "py32f071_ll_dma.h"
 #include "driver/system.h"
+#include "driver/systick.h"
 
 #define SPIx SPI2
 #define CHANNEL_RD LL_DMA_CHANNEL_4
@@ -31,7 +32,12 @@
 
 #define CS_PIN GPIO_MAKE_PIN(GPIOA, LL_GPIO_PIN_3)
 
-static uint8_t TX_Buf[256];
+#define SECTOR_SIZE 0x1000
+#define PAGE_SIZE 0x100
+
+static uint32_t SectorCacheAddr = 0x1000000;
+static uint8_t SectorCache[SECTOR_SIZE];
+static uint8_t BlackHole[1];
 static volatile bool TC_Flag;
 
 static inline void CS_Assert()
@@ -126,7 +132,56 @@ static void SPI_ReadBuf(uint8_t *Buf, uint32_t Size)
     LL_DMA_SetPeriphAddress(DMA1, CHANNEL_RD, LL_SPI_DMA_GetRegAddr(SPIx));
     LL_DMA_SetDataLength(DMA1, CHANNEL_RD, Size);
 
-    LL_DMA_SetMemoryAddress(DMA1, CHANNEL_WR, (uint32_t)TX_Buf);
+    LL_DMA_SetMemoryAddress(DMA1, CHANNEL_WR, (uint32_t)BlackHole);
+    LL_DMA_SetPeriphAddress(DMA1, CHANNEL_WR, LL_SPI_DMA_GetRegAddr(SPIx));
+    LL_DMA_SetDataLength(DMA1, CHANNEL_WR, Size);
+
+    TC_Flag = false;
+    LL_DMA_EnableIT_TC(DMA1, CHANNEL_RD);
+    LL_DMA_EnableChannel(DMA1, CHANNEL_RD);
+    LL_DMA_EnableChannel(DMA1, CHANNEL_WR);
+
+    LL_SPI_EnableDMAReq_RX(SPIx);
+    LL_SPI_Enable(SPIx);
+    LL_SPI_EnableDMAReq_TX(SPIx);
+
+    while (!TC_Flag)
+        ;
+}
+
+static void SPI_WriteBuf(const uint8_t *Buf, uint32_t Size)
+{
+    LL_SPI_Disable(SPIx);
+    LL_DMA_DisableChannel(DMA1, CHANNEL_RD);
+    LL_DMA_DisableChannel(DMA1, CHANNEL_WR);
+
+    LL_DMA_ClearFlag_GI4(DMA1);
+
+    LL_DMA_ConfigTransfer(DMA1, CHANNEL_RD,                 //
+                          LL_DMA_DIRECTION_PERIPH_TO_MEMORY //
+                              | LL_DMA_MODE_NORMAL          //
+                              | LL_DMA_PERIPH_NOINCREMENT   //
+                              | LL_DMA_MEMORY_NOINCREMENT   //
+                              | LL_DMA_PDATAALIGN_BYTE      //
+                              | LL_DMA_MDATAALIGN_BYTE      //
+                              | LL_DMA_PRIORITY_LOW         //
+    );
+
+    LL_DMA_ConfigTransfer(DMA1, CHANNEL_WR,                 //
+                          LL_DMA_DIRECTION_MEMORY_TO_PERIPH //
+                              | LL_DMA_MODE_NORMAL          //
+                              | LL_DMA_PERIPH_NOINCREMENT   //
+                              | LL_DMA_MEMORY_INCREMENT     //
+                              | LL_DMA_PDATAALIGN_BYTE      //
+                              | LL_DMA_MDATAALIGN_BYTE      //
+                              | LL_DMA_PRIORITY_LOW         //
+    );
+
+    LL_DMA_SetMemoryAddress(DMA1, CHANNEL_RD, (uint32_t)BlackHole);
+    LL_DMA_SetPeriphAddress(DMA1, CHANNEL_RD, LL_SPI_DMA_GetRegAddr(SPIx));
+    LL_DMA_SetDataLength(DMA1, CHANNEL_RD, Size);
+
+    LL_DMA_SetMemoryAddress(DMA1, CHANNEL_WR, (uint32_t)Buf);
     LL_DMA_SetPeriphAddress(DMA1, CHANNEL_WR, LL_SPI_DMA_GetRegAddr(SPIx));
     LL_DMA_SetDataLength(DMA1, CHANNEL_WR, Size);
 
@@ -153,6 +208,14 @@ static uint8_t SPI_WriteByte(uint8_t Value)
     return LL_SPI_ReceiveData8(SPIx);
 }
 
+static void WriteAddr(uint32_t Addr);
+static uint8_t ReadStatusReg(uint32_t Which);
+static void WaitWIP();
+static void WriteEnable();
+static void SectorErase(uint32_t Addr);
+static void SectorProgram(uint32_t Addr, const uint8_t *Buf, uint32_t Size);
+static void PageProgram(uint32_t Addr, const uint8_t *Buf, uint32_t Size);
+
 void PY25Q16_Init()
 {
     CS_Release();
@@ -164,9 +227,7 @@ void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
     CS_Assert();
 
     SPI_WriteByte(0x03); // Fast read
-    SPI_WriteByte(0xff & (Address >> 16));
-    SPI_WriteByte(0xff & (Address >> 8));
-    SPI_WriteByte(0xff & Address);
+    WriteAddr(Address);
 
     if (Size >= 16)
     {
@@ -183,8 +244,184 @@ void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
     CS_Release();
 }
 
-void PY25Q16_WriteBuffer(uint16_t Address, const void *pBuffer)
+void PY25Q16_WriteBuffer(uint32_t Address, const void *pBuffer, uint32_t Size, bool Append)
 {
+    while (Size)
+    {
+        uint32_t SecIndex = Address / SECTOR_SIZE;
+        uint32_t SecOffset = Address % SECTOR_SIZE;
+        uint32_t SecSize = SECTOR_SIZE - SecOffset;
+        if (Size < SecSize)
+        {
+            SecSize = Size;
+        }
+
+        uint32_t SecAddr = SecIndex * SECTOR_SIZE;
+        if (SecAddr != SectorCacheAddr)
+        {
+            PY25Q16_ReadBuffer(SecAddr, SectorCache, SECTOR_SIZE);
+            SectorCacheAddr = SecAddr;
+        }
+
+        if (0 != strncmp(pBuffer, (char *)SectorCache + SecOffset, SecSize))
+        {
+            bool Erase = false;
+            for (uint32_t i = 0; i < SecSize; i++)
+            {
+                if (0xff != SectorCache[SecOffset + i])
+                {
+                    Erase = true;
+                    break;
+                }
+            }
+
+            memcpy(SectorCache + SecOffset, pBuffer, SecSize);
+
+            if (Erase)
+            {
+                SectorErase(SecAddr);
+                if (Append)
+                {
+                    SectorProgram(SecAddr, SectorCache, SecOffset + SecSize);
+                    memset(SectorCache + SecOffset + SecSize, 0xff, SECTOR_SIZE - SecOffset - SecSize);
+                }
+                else
+                {
+                    SectorProgram(SecAddr, SectorCache, SECTOR_SIZE);
+                }
+            }
+            else
+            {
+                SectorProgram(Address, pBuffer, SecSize);
+            }
+        }
+
+        Address += SecSize;
+        pBuffer += SecSize;
+        Size -= SecSize;
+    } // while
+}
+
+void PY25Q16_SectorErase(uint32_t Address)
+{
+    Address -= (Address % SECTOR_SIZE);
+    SectorErase(Address);
+    if (SectorCacheAddr == Address)
+    {
+        memset(SectorCache, 0xff, SECTOR_SIZE);
+    }
+}
+
+static inline void WriteAddr(uint32_t Addr)
+{
+    SPI_WriteByte(0xff & (Addr >> 16));
+    SPI_WriteByte(0xff & (Addr >> 8));
+    SPI_WriteByte(0xff & Addr);
+}
+
+static uint8_t ReadStatusReg(uint32_t Which)
+{
+    uint8_t Cmd;
+    switch (Which)
+    {
+    case 0:
+        Cmd = 0x5;
+        break;
+    case 1:
+        Cmd = 0x35;
+        break;
+    case 2:
+        Cmd = 0x15;
+        break;
+    default:
+        return 0;
+    }
+
+    CS_Assert();
+    SPI_WriteByte(Cmd);
+    uint8_t Value = SPI_WriteByte(0xff);
+    CS_Release();
+
+    return Value;
+}
+
+static void WaitWIP()
+{
+    for (int i = 0; i < 1000000; i++)
+    {
+        uint8_t Status = ReadStatusReg(0);
+        if (1 & Status) // WIP
+        {
+            SYSTICK_DelayUs(10);
+            continue;
+        }
+        break;
+    }
+}
+
+static void WriteEnable()
+{
+    CS_Assert();
+    SPI_WriteByte(0x6);
+    CS_Release();
+}
+
+static void SectorErase(uint32_t Addr)
+{
+    WriteEnable();
+    WaitWIP();
+
+    CS_Assert();
+    SPI_WriteByte(0x20);
+    WriteAddr(Addr);
+    CS_Release();
+
+    WaitWIP();
+}
+
+static void SectorProgram(uint32_t Addr, const uint8_t *Buf, uint32_t Size)
+{
+    while (Size)
+    {
+        uint32_t Size1 = PAGE_SIZE - (Addr % PAGE_SIZE);
+        if (Size < Size1)
+        {
+            Size1 = Size;
+        }
+
+        PageProgram(Addr, Buf, Size1);
+
+        Addr += Size1;
+        Buf += Size1;
+        Size -= Size1;
+    }
+}
+
+static void PageProgram(uint32_t Addr, const uint8_t *Buf, uint32_t Size)
+{
+    WriteEnable();
+    WaitWIP();
+
+    CS_Assert();
+
+    SPI_WriteByte(0x2);
+    WriteAddr(Addr);
+
+    if (Size >= 16)
+    {
+        SPI_WriteBuf(Buf, Size);
+    }
+    else
+    {
+        for (uint32_t i = 0; i < Size; i++)
+        {
+            SPI_WriteByte(Buf[i]);
+        }
+    }
+
+    CS_Release();
+
+    WaitWIP();
 }
 
 void DMA1_Channel4_5_6_7_IRQHandler()

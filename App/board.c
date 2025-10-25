@@ -25,6 +25,7 @@
 #include "py32f071_ll_gpio.h"
 #include "py32f071_ll_rcc.h"
 #include "py32f071_ll_adc.h"
+#include "driver/dac.h"
 #include "driver/backlight.h"
 #ifdef ENABLE_FMRADIO
     #include "driver/bk1080.h"
@@ -110,15 +111,21 @@ void BOARD_GPIO_Init(void)
     InitStruct.Pin = LL_GPIO_PIN_9 | LL_GPIO_PIN_8 | LL_GPIO_PIN_2;
     LL_GPIO_Init(GPIOB, &InitStruct);
 
+    // TODO: conditional compile per ENABLE_FLASHLIGHT
     // Flashlight: PC13
     InitStruct.Pin = LL_GPIO_PIN_13;
     LL_GPIO_Init(GPIOC, &InitStruct);
 
+#ifdef ENABLE_FMRADIO
     // BK1080 SCK: PF5
     // BK1080 SDA: PF6
+    InitStruct.Pin = LL_GPIO_PIN_6 | LL_GPIO_PIN_5;
+    LL_GPIO_Init(GPIOF, &InitStruct);
+#endif
+
     // Backlight: PF8
     // BK4819 CS: PF9
-    InitStruct.Pin = LL_GPIO_PIN_9 | LL_GPIO_PIN_8 | LL_GPIO_PIN_6 | LL_GPIO_PIN_5;
+    InitStruct.Pin = LL_GPIO_PIN_9 | LL_GPIO_PIN_8  ;
     LL_GPIO_Init(GPIOF, &InitStruct);
 
 #ifndef ENABLE_SWD
@@ -172,6 +179,9 @@ void BOARD_Init(void)
     BOARD_GPIO_Init();
     BACKLIGHT_InitHardware();
     BOARD_ADC_Init();
+#ifdef ENABLE_VOICE
+    DAC_Init();
+#endif
     PY25Q16_Init();
     ST7565_Init();
 #ifdef ENABLE_FMRADIO

@@ -74,22 +74,22 @@ static void SPI_Init()
     LL_SPI_Enable(SPIx);
 }
 
-static inline void AssertCS()
+static inline void CS_Assert()
 {
     GPIO_ResetOutputPin(PIN_CS);
 }
 
-static inline void ReleaseCS()
+static inline void CS_Release()
 {
     GPIO_SetOutputPin(PIN_CS);
 }
 
-static inline void SetA0()
+static inline void A0_Set()
 {
     GPIO_SetOutputPin(PIN_A0);
 }
 
-static inline void ResetA0()
+static inline void A0_Reset()
 {
     GPIO_ResetOutputPin(PIN_A0);
 }
@@ -110,7 +110,7 @@ static uint8_t SPI_WriteByte(uint8_t Value)
 static void DrawLine(uint8_t column, uint8_t line, const uint8_t * lineBuffer, unsigned size_defVal)
 {   
     ST7565_SelectColumnAndLine(column + 4, line);
-    SetA0();
+    A0_Set();
     for (unsigned i = 0; i < size_defVal; i++) {
         SPI_WriteByte(lineBuffer ? lineBuffer[i] : size_defVal);
     }
@@ -118,9 +118,9 @@ static void DrawLine(uint8_t column, uint8_t line, const uint8_t * lineBuffer, u
 
 void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const uint8_t *pBitmap, const unsigned int Size)
 {
-    AssertCS();
+    CS_Assert();
     DrawLine(Column, Line, pBitmap, Size);
-    ReleaseCS();
+    CS_Release();
 }
 
 
@@ -134,7 +134,7 @@ void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const u
 
     static void ST7565_BlitScreen(uint8_t line)
     {
-        AssertCS();
+        CS_Assert();
         ST7565_WriteByte(0x40);
 
         if(line == 0)
@@ -152,7 +152,7 @@ void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const u
             }
         }
 
-        ReleaseCS();
+        CS_Release();
     }
 
     void ST7565_BlitFullScreen(void)
@@ -172,38 +172,38 @@ void ST7565_DrawLine(const unsigned int Column, const unsigned int Line, const u
 #else
     void ST7565_BlitFullScreen(void)
     {
-        AssertCS();
+        CS_Assert();
         ST7565_WriteByte(0x40);
         for (unsigned line = 0; line < FRAME_LINES; line++) {
             DrawLine(0, line+1, gFrameBuffer[line], LCD_WIDTH);
         }
-        ReleaseCS();
+        CS_Release();
     }
 
     void ST7565_BlitLine(unsigned line)
     {
-        AssertCS();
+        CS_Assert();
         ST7565_WriteByte(0x40);    // start line ?
         DrawLine(0, line+1, gFrameBuffer[line], LCD_WIDTH);
-        ReleaseCS();
+        CS_Release();
     }
 
     void ST7565_BlitStatusLine(void)
     {   // the top small text line on the display
-        AssertCS();
+        CS_Assert();
         ST7565_WriteByte(0x40);    // start line ?
         DrawLine(0, 0, gStatusLine, LCD_WIDTH);
-        ReleaseCS();
+        CS_Release();
     }
 #endif
 
 void ST7565_FillScreen(uint8_t value)
 {
-    AssertCS();
+    CS_Assert();
     for (unsigned i = 0; i < 8; i++) {
         DrawLine(0, i, NULL, value);
     }
-    ReleaseCS();
+    CS_Release();
 }
 
 // Software reset
@@ -289,7 +289,7 @@ uint8_t cmds[] = {
     #if defined(ENABLE_FEAT_F4HWN_CTR) || defined(ENABLE_FEAT_F4HWN_INV)
     void ST7565_ContrastAndInv(void)
     {
-        AssertCS();
+        CS_Assert();
         ST7565_WriteByte(ST7565_CMD_SOFTWARE_RESET);   // software reset
 
         for(uint8_t i = 0; i < 8; i++)
@@ -327,7 +327,7 @@ void ST7565_Init(void)
 {
     SPI_Init();
     ST7565_HardwareReset();
-    AssertCS();
+    CS_Assert();
     ST7565_WriteByte(ST7565_CMD_SOFTWARE_RESET);   // software reset
     SYSTEM_DelayMs(120);
 
@@ -353,7 +353,7 @@ void ST7565_Init(void)
     ST7565_WriteByte(ST7565_CMD_SET_START_LINE | 0);   // line 0
     ST7565_WriteByte(ST7565_CMD_DISPLAY_ON_OFF | 1);   // D=1
 
-    ReleaseCS();
+    CS_Release();
 
     ST7565_FillScreen(0x00);
 }
@@ -361,17 +361,17 @@ void ST7565_Init(void)
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
     void ST7565_ShutDown(void)
     {
-        AssertCS();
+        CS_Assert();
         ST7565_WriteByte(ST7565_CMD_POWER_CIRCUIT | 0b000);   // VB=0 VR=1 VF=1
         ST7565_WriteByte(ST7565_CMD_SET_START_LINE | 0);   // line 0
         ST7565_WriteByte(ST7565_CMD_DISPLAY_ON_OFF | 0);   // D=1
-        ReleaseCS();
+        CS_Release();
     }
 #endif
 
 void ST7565_FixInterfGlitch(void)
 {
-    AssertCS();
+    CS_Assert();
     for(uint8_t i = 0; i < ARRAY_SIZE(cmds); i++)
 #ifdef ENABLE_FEAT_F4HWN
         ST7565_Cmd(i);
@@ -379,7 +379,7 @@ void ST7565_FixInterfGlitch(void)
         ST7565_WriteByte(cmds[i]);
 #endif
 
-    ReleaseCS();
+    CS_Release();
 }
 
 void ST7565_HardwareReset(void)
@@ -390,14 +390,17 @@ void ST7565_HardwareReset(void)
 
 void ST7565_SelectColumnAndLine(uint8_t Column, uint8_t Line)
 {
-    ResetA0();
+    A0_Reset();
     SPI_WriteByte(Line + 176);
     SPI_WriteByte(((Column >> 4) & 0x0F) | 0x10);
     SPI_WriteByte((Column >> 0) & 0x0F);
 }
 
+/**
+ *  Write a command (rather than pixel data)
+ */
 void ST7565_WriteByte(uint8_t Value)
 {
-    ResetA0();
+    A0_Reset();
     SPI_WriteByte(Value);
 }

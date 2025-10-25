@@ -50,11 +50,13 @@ else()
     endif()
 endif()
 
-if(${TARGET})
+if(TARGET)
     set(EXE_NAME ${TARGET})
 else()
     set(EXE_NAME "firmware")
 endif()
+
+message("EXE_NAME = " ${EXE_NAME})
 
 add_executable(${EXE_NAME})
 
