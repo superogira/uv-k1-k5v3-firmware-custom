@@ -999,7 +999,7 @@ void RADIO_SetModulation(ModulationMode_t modulation)
             mod = BK4819_AF_FM;
             break;
         case MODULATION_AM:
-            mod = BK4819_AF_AM;
+            mod = BK4819_AF_FM; // AM no longer needs special AF setting
             break;
         case MODULATION_USB:
             mod = BK4819_AF_BASEBAND2;
@@ -1017,6 +1017,35 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 
     BK4819_SetAF(mod);
 
+    // HACK, FIXME:
+    // What follows is a direct copy of the AM enable/disable code from
+    // the original UV-K1 firmware. It is not clear why these specific register
+    // values are used for AM all of a sudden instead of the AF setting like on
+    // the BK4819, nor what exactly they do.
+    // So for now we just keep it as is to maintain compatibility.
+    //
+    if (modulation != MODULATION_AM)
+    {
+        uint16_t uVar1 = BK4819_ReadRegister(0x31);
+        BK4819_WriteRegister(0x31,uVar1 & 0xfffffffe);
+        BK4819_WriteRegister(0x42,0x6b5a);
+        BK4819_WriteRegister(0x43, 0x3028);
+        BK4819_WriteRegister(0x2a,0x7400);
+        BK4819_WriteRegister(0x2b,0);
+        BK4819_WriteRegister(0x2f,0x9890);
+        //BK4819_WriteRegister(0x48, 0xb3a8); // set AF RX gain and DAC settings
+    }
+    else
+    {
+        uint16_t uVar1 = BK4819_ReadRegister(0x31);
+        BK4819_WriteRegister(0x31,uVar1 | 1);
+        BK4819_WriteRegister(0x42,0x6f5c);
+        BK4819_WriteRegister(0x43, 0x347c);
+        BK4819_WriteRegister(0x2a,0x7434);
+        BK4819_WriteRegister(0x2b,0x600);
+        BK4819_WriteRegister(0x2f,0x9990);
+    }
+    
     BK4819_SetRegValue(afDacGainRegSpec, 0xF);
     BK4819_WriteRegister(BK4819_REG_3D, modulation == MODULATION_USB ? 0 : 0x2AAB);
     BK4819_SetRegValue(afcDisableRegSpec, modulation != MODULATION_FM);
