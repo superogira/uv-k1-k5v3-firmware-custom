@@ -446,20 +446,45 @@ void Render_GameResult() {
 
     // --- Line 1-2: แสดงผลลัพธ์ ---
     if (is_time_up) {
-         UI_PrintStringSmallBold("TIME'S UP!", 0, 0, 2);
+         UI_PrintStringSmallBold("TIME'S UP!", 0, 0, 1);
     } else if (isCorrect) {
-         UI_PrintStringSmallBold("CORRECT!", 0, 0, 2);
+         UI_PrintStringSmallBold("CORRECT!", 0, 0, 1);
     } else {
-         UI_PrintStringSmallBold("WRONG!", 0, 0, 2);
+         UI_PrintStringSmallBold("WRONG!", 0, 0, 1);
     }
     
-    // --- Line 4: เฉลย ---
+    // --- Line 4: เฉลยคำตอบ (ตัวหนา) ---
     char buf[32];
     sprintf(buf, "Ans: %s", quiz_answer_str);
-    UI_PrintStringSmallBold(buf, 0, 0, 4); 
+    UI_PrintStringSmallBold(buf, 0, 0, 3); 
+    
+    // --- [เพิ่มส่วนนี้] Line 5: เฉลยรหัสมอร์ส (ตัวเล็ก) ---
+    char morseBuf[64] = ""; // เตรียมที่ว่างไว้เยอะๆ
+    
+    // วนลูปแปลงคำตอบเป็นรหัสจุดขีด
+    for (int i = 0; quiz_answer_str[i] != '\0'; i++) {
+        // หาตัวอักษรในตาราง
+        for (int j = 0; j < 42; j++) {
+            if (morse_table[j].character == quiz_answer_str[i]) {
+                // ถ้าไม่ใช่ตัวแรก ให้เติมเว้นวรรคคั่น
+                if (i > 0) strcat(morseBuf, "  ");
+                strcat(morseBuf, morse_table[j].code);
+                break;
+            }
+        }
+    }
+    
+    // คำนวณหาตำแหน่งกึ่งกลาง (คร่าวๆ ตัวละ 6 pixel)
+    int len = strlen(morseBuf);
+    int x_pos = (128 - (len * 6)) / 2;
+    if (x_pos < 0) x_pos = 0;
+
+    // พิมพ์ที่ Y=41 (ตรงกับบรรทัดที่ 5 กว่าๆ)
+    // false สุดท้ายคือ ไม่ตัวหนา (จะได้ประหยัดที่)
+    GUI_DisplaySmallest(morseBuf, x_pos, 38, false, true);
+    // ----------------------------------------------------
     
     // --- Line 6: คำแนะนำ ---
-    // ใช้ Start=0, End=0 ตามที่คุณแนะนำ
     UI_PrintStringSmallBold("Press [MENU] Next", 0, 0, 6);
     
     UI_Flush();
