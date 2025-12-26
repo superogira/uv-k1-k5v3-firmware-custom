@@ -43,7 +43,9 @@ typedef enum {
     STATE_GAME_LISTEN,     // หน้า "กำลังฟังเสียง..."
     STATE_GAME_ANSWER,     // หน้า "เลือกคำตอบ" (จับเวลาที่นี่)
     STATE_GAME_RESULT,     // หน้าเฉลย (ถูก/ผิด)
-    STATE_GAME_SCORE       // หน้าสรุปคะแนนตอนจบ
+    STATE_GAME_SCORE,       // หน้าสรุปคะแนนตอนจบ
+	STATE_PRACTICE_SEND, // โหมดฝึกส่ง
+    STATE_PRACTICE_ECHO
 } AppState;
 
 // ชื่อเมนูที่จะโชว์
@@ -81,6 +83,23 @@ uint8_t setting_wpm = MORSE_WPM_DEFAULT;
 uint16_t setting_tone = MORSE_TONE_DEFAULT;
 uint8_t setting_length = 5;     // จำนวนตัวอักษรที่จะสุ่ม (Default 5)
 int setting_step = 0;           // 0=Tone, 1=WPM, 2=Length
+
+// --- ตัวแปรสำหรับโหมด Send Practice ---
+char send_buf[10];           // เก็บจุดขีดที่กำลังเคาะ เช่น ".-."
+char send_history[21];       // เก็บตัวอักษรที่แปลได้แล้ว เช่น "HELLO"
+bool is_key_pressed = false; // สถานะปุ่มกดปัจจุบัน
+uint32_t key_timer = 0;      // จับเวลาตอนกด/ปล่อย
+bool reload_send_screen = false;	// [เพิ่ม] ตัวช่วยรีเซ็ตหน้าจอ
+char last_code_buf[16];	// [เพิ่ม] ตัวแปรเก็บรหัสล่าสุดเพื่อแสดงผล
+
+// [เพิ่ม] ตัวแปรสำหรับ Echo Mode
+char echo_target_char;      // ตัวโจทย์ (เช่น 'A')
+char echo_input_char;       // ตัวที่เรากด (เช่น 'B')
+char echo_input_code[10];   // รหัสที่เรากด (เช่น "-...")
+int echo_score_correct = 0; // คะแนนที่ถูก
+int echo_score_total = 0;   // จำนวนข้อทั้งหมด
+
+bool is_quiz_mode = false; // ตัวแปรจำว่าเล่นโหมด Quiz (ฟังเสียง) อยู่หรือไม่
 
 int my_rand() {
     rng_seed = rng_seed * 1103515245 + 12345;
@@ -361,6 +380,16 @@ void PlayQuizSound() {
     AUDIO_AudioPathOff();
 }
 
+// Helper: แปลงรหัสจุดขีด เป็นตัวอักษร
+char DecodeMorseStr(const char* code) {
+    for (int i = 0; i < 42; i++) {
+        if (strcmp(morse_table[i].code, code) == 0) {
+            return morse_table[i].character;
+        }
+    }
+    return '?'; // ไม่พบในตาราง
+}
+
 /* void Render_PracticeSelect() {
     UI_ClearScreen();
     UI_DrawText(32, 0, "PRACTICE", false);
@@ -382,21 +411,21 @@ void Render_PracticeSelect() {
     
     char buf[32];
 
-    // --- Line 2: ตัวเลือก Free Mode ---
-    if (menu_cursor == 0) {
-        sprintf(buf, "> 1. Free Mode");
-    } else {
-        sprintf(buf, "  1. Free Mode");
-    }
+    // 1. Free Mode
+    sprintf(buf, "%c 1. RX: Untimed", (menu_cursor == 0) ? '>' : ' ');
     UI_PrintStringSmallBold(buf, 0, 0, 2);
     
-    // --- Line 3: ตัวเลือก Timed Mode ---
-    if (menu_cursor == 1) {
-        sprintf(buf, "> 2. Timed (5s)");
-    } else {
-        sprintf(buf, "  2. Timed (5s)");
-    }
+    // 2. Timed Mode
+    sprintf(buf, "%c 2. RX: Timed(5s)", (menu_cursor == 1) ? '>' : ' ');
     UI_PrintStringSmallBold(buf, 0, 0, 3);
+
+    // 3. Send Mode
+    sprintf(buf, "%c 3. TX: Echo", (menu_cursor == 2) ? '>' : ' ');
+    UI_PrintStringSmallBold(buf, 0, 0, 4);
+
+    // 4. Echo Mode [เพิ่ม]
+    sprintf(buf, "%c 4. TX: Free Key", (menu_cursor == 3) ? '>' : ' ');
+    UI_PrintStringSmallBold(buf, 0, 0, 5);
     
     // --- Line 6: Footer ---
     UI_PrintStringSmallBold("[MENU] Start", 0, 0, 6);
@@ -499,17 +528,101 @@ void Render_ScoreSummary() {
     
     char buf[32];
     
-    // --- Line 2: คะแนนที่ได้ ---
-    sprintf(buf, "Score: %d", score_correct);
+    // --- Line 2: คะแนน ---
+    sprintf(buf, "Score: %d / %d", score_correct, score_total);
     UI_PrintStringSmallBold(buf, 0, 0, 2);
     
-    // --- Line 3: จำนวนข้อรวม ---
-    sprintf(buf, "Total: %d", score_total);
-    UI_PrintStringSmallBold(buf, 0, 0, 3);
+
+	
+	// --- Line 3 และ 4 ---
+    if (is_quiz_mode) {
+		// --- Line 3: ความเร็ว ---
+		sprintf(buf, "Speed: %d WPM", setting_wpm);
+		UI_PrintStringSmallBold(buf, 0, 0, 3);
+		// --- Line 4: จำนวนตัวอักษร (โชว์เฉพาะโหมด Quiz) ---
+        sprintf(buf, "Length: %d chars", setting_length);
+        UI_PrintStringSmallBold(buf, 0, 0, 4);
+    } else {
+        // --- Line 3: ถ้าเป็น Echo Mode อาจจะโชว์ว่าเป็นโหมดอะไรแทนก็ได้ (Optional)
+        UI_PrintStringSmallBold("Mode: Sending", 0, 0, 4);
+    }
     
     // --- Line 6: ปุ่มออก ---
     UI_PrintStringSmallBold("Press [EXIT] Quit", 0, 0, 6);
     
+    UI_Flush();
+}
+
+void Render_SendPractice() {
+    UI_ClearScreen();
+
+    // Line 0: Header
+    UI_PrintStringSmallBold("SEND PRACTICE", 0, 0, 0);
+    UI_DrawRectangleBuffer(gFrameBuffer, 0, 9, 127, 10, true);
+    
+    // Line 2: History (ข้อความที่พิมพ์ไปแล้ว)
+    int len = strlen(send_history);
+    char* show_ptr = send_history;
+    if (len > 14) show_ptr = &send_history[len - 14];
+    
+    char histBuf[32];
+    sprintf(histBuf, "\"%s\"", show_ptr);
+    UI_PrintStringSmallBold(histBuf, 0, 0, 2);
+
+    // Line 4: Last Code (แก้ไขใหม่ ใช้ last_code_buf)
+    char codeBuf[32];
+    if (strlen(last_code_buf) > 0) {
+        sprintf(codeBuf, "Last: %s", last_code_buf);
+    } else {
+        sprintf(codeBuf, "Last: -");
+    }
+    UI_PrintStringSmallBold(codeBuf, 0, 0, 3);
+    
+    // Line 6-7: Info
+    UI_PrintStringSmallBold("[Side2] Manual", 0, 0, 5);
+    UI_PrintStringSmallBold("[7] Dot  [9] Dash", 0, 0, 6);
+
+    UI_Flush();
+}
+
+void Render_PracticeEcho() {
+    UI_ClearScreen();
+
+    // --- Line 0: Header & Score ---
+    UI_PrintStringSmallBold("ECHO MODE", 0, 0, 0);
+    
+    char scoreBuf[16];
+    sprintf(scoreBuf, "%d/%d", echo_score_correct, echo_score_total);
+    UI_PrintStringSmallBold(scoreBuf, 85, 0, 0);
+
+    UI_DrawRectangleBuffer(gFrameBuffer, 0, 9, 127, 10, true);
+    
+    // --- Line 2: Target (โจทย์) ---
+    char targetBuf[32];
+    sprintf(targetBuf, "Target:  [ %c ]", echo_target_char);
+    UI_PrintStringSmallBold(targetBuf, 0, 0, 2);
+
+    // --- Line 4: Input (สิ่งที่เรากด) ---
+    // [แก้ไข] เปลี่ยนจาก targetBuf เป็น inputBuf ให้หมดในท่อนนี้
+    char inputBuf[32]; 
+    if (echo_score_total > 0 && echo_input_char != 0) {
+        char mark = (echo_input_char == echo_target_char) ? '/' : 'X';
+        sprintf(inputBuf, "You:     [ %c ] %c", echo_input_char, mark); // แก้ตรงนี้
+    } else {
+        sprintf(inputBuf, "You:     [ ? ]"); // แก้ตรงนี้
+    }
+    UI_PrintStringSmallBold(inputBuf, 0, 0, 4); // แก้ตรงนี้
+    
+    // --- Line 5: Morse Code ---
+    if (strlen(echo_input_code) > 0) {
+        char codeDisp[32];
+        sprintf(codeDisp, "Code: %s", echo_input_code);
+        GUI_DisplaySmallest(codeDisp, 4, 42, false, true);
+    }
+
+    // --- Line 7: Footer ---
+    UI_PrintStringSmallBold("[Side2] to Key", 0, 0, 7);
+
     UI_Flush();
 }
 
@@ -653,22 +766,77 @@ void Morse_HandleKeys(int key_code, bool is_long_press) {
         case STATE_PRACTICE_SELECT:
             if (key_code == KEY_EXIT) {
                 current_state = STATE_MAIN_MENU;
-				menu_cursor = 1;
+                menu_cursor = 1; 
             }
-            else if (key_code == KEY_UP || key_code == KEY_DOWN) {
-                menu_cursor = (menu_cursor == 0) ? 1 : 0;
+            // --- แก้ไขปุ่ม UP (ให้วนไปล่างสุด) ---
+            else if (key_code == KEY_UP) {
+                if (menu_cursor > 0) {
+                    menu_cursor--;
+                } else {
+                    menu_cursor = 3; // ถ้าอยู่บนสุด (0) ให้วนไปล่างสุด (3)
+                }
+            }
+            // --- แก้ไขปุ่ม DOWN (ให้วนไปบนสุด) ---
+            else if (key_code == KEY_DOWN) {
+                if (menu_cursor < 3) {
+                    menu_cursor++;
+                } else {
+                    menu_cursor = 0; // ถ้าอยู่ล่างสุด (3) ให้วนไปบนสุด (0)
+                }
             }
             else if (key_code == KEY_MENU) {
-                // เริ่มเกม!
-                is_timed_mode = (menu_cursor == 1);
-                score_correct = 0;
-                score_total = 0;
-                
-                GenerateQuiz(); // สร้างโจทย์ข้อแรก
-                current_state = STATE_GAME_LISTEN; // ไปหน้าฟังเสียง
+                if (menu_cursor == 2) {
+                    // [เพิ่ม] เข้า Echo Mode
+                    current_state = STATE_PRACTICE_ECHO;
+                    
+                    // Reset ค่า
+                    memset(send_buf, 0, sizeof(send_buf));
+                    memset(echo_input_code, 0, sizeof(echo_input_code));
+                    echo_score_correct = 0;
+                    echo_score_total = 0;
+                    echo_input_char = 0;
+                    
+                    // สุ่มโจทย์ข้อแรก
+                    int r = my_rand() % 42;
+                    echo_target_char = morse_table[r].character;
+                    
+                    AUDIO_AudioPathOn();
+                    reload_send_screen = true; // ใช้ตัวแปรช่วยวาดจอตัวเดิม
+					
+					is_quiz_mode = false; // ไม่ใช่ Quiz (ถือเป็นโหมดเคาะ)
+                } else if (menu_cursor == 3) {
+                    // เข้าโหมด Send Practice
+                    current_state = STATE_PRACTICE_SEND;
+                    
+                    // Reset ค่าต่างๆ
+                    memset(send_buf, 0, sizeof(send_buf));
+                    memset(send_history, 0, sizeof(send_history));
+					memset(last_code_buf, 0, sizeof(last_code_buf));
+                    is_key_pressed = false;
+                    key_timer = 0;
+
+                    // [แก้ไข] เปิดระบบเสียงค้างไว้เลย เพื่อความไวสูงสุด!
+                    AUDIO_AudioPathOn();
+					
+					// [เพิ่ม] สั่งให้วาดหน้าจอใหม่แน่นอน
+                    reload_send_screen = true;
+					
+					is_quiz_mode = false; // ไม่ใช่ Quiz
+                }
+				else {
+                    // โหมดเดิม (0, 1)
+                    is_timed_mode = (menu_cursor == 1);
+                    score_correct = 0;
+                    score_total = 0;
+					
+					is_quiz_mode = true;
+					
+                    GenerateQuiz(); 
+                    current_state = STATE_GAME_LISTEN;
+                }
             }
             break;
-			
+		
 		case STATE_GAME_LISTEN:
             // สถานะนี้เราฟังเสียงอย่างเดียว ไม่รับปุ่มกด
             break;
@@ -712,7 +880,37 @@ void Morse_HandleKeys(int key_code, bool is_long_press) {
                 current_state = STATE_MAIN_MENU;
              }
              break;
-			 
+
+		case STATE_PRACTICE_SEND:
+            if (key_code == KEY_EXIT) {
+                // ออกจากโหมดฝึกส่ง
+                current_state = STATE_PRACTICE_SELECT;
+                
+                // [แก้ไข] ปิดเสียงเมื่อออกจากหน้านี้
+                BK4819_EnterTxMute();
+                BK4819_PlayTone(0, false);
+                AUDIO_AudioPathOff();
+            }
+            break;
+			
+		case STATE_PRACTICE_ECHO:
+            // ไม่ต้องทำอะไร เพราะเราจัดการปุ่มใน App Loop แล้ว
+            if (key_code == KEY_EXIT) {
+				// ออกจากโหมด Echo -> ไปหน้าสรุปคะแนน
+                score_correct = echo_score_correct;
+                score_total = echo_score_total;
+				
+				current_state = STATE_GAME_SCORE;
+				
+				// ปิดเสียง
+                BK4819_EnterTxMute();
+                BK4819_PlayTone(0, false);
+                AUDIO_AudioPathOff();
+				
+                menu_cursor = 1; 
+            }
+            break;
+			
         case STATE_SETTINGS:
             if (key_code == KEY_EXIT) {
                 // ยกเลิกและกลับเมนูหลัก (Reset step กลับไป 0 เผื่อเข้ามาใหม่)
@@ -817,9 +1015,32 @@ void Morse_App_Loop() {
                 // ส่งปุ่มไปให้ Logic ของ App จัดการ
                 Morse_HandleKeys(key, false);
             }
+
+			// [แก้ไข] ใส่เงื่อนไขดักไว้
+            // ถ้าอยู่ในโหมดฝึกส่ง (Send/Echo) ห้าม Delay นาน! (เดี๋ยวคีย์สะดุด)
+            if (current_state == STATE_PRACTICE_SEND || current_state == STATE_PRACTICE_ECHO) {
+                 // ไม่ต้อง Delay หรือ Delay น้อยมากๆ
+            } else {
+                 // โหมดอื่น Delay ปกติเพื่อกันปุ่มเบิ้ล
+                 SYSTEM_DelayMs(100); 
+            }
+			
+			// ถ้าเป็นปุ่ม MENU หรือ EXIT ให้รอจนกว่าจะปล่อยมือ (ป้องกันการทะลุเมนู)
+            if (key == KEY_MENU || key == KEY_EXIT) {
+                // รอจนกว่าค่าปุ่มจะหายไป (ปล่อยมือ)
+                while(KEYBOARD_Poll() == key) {
+                    SYSTEM_DelayMs(10); 
+                }
+                // แถม Delay อีกนิดกันสัญญาณกระเพื่อมตอนปล่อย
+                SYSTEM_DelayMs(50); 
+            } else {
+                // ปุ่มอื่นๆ (เช่น UP/DOWN) ให้หน่วงเวลาปกติ (เพื่อให้กดค้างเลื่อนเร็วๆ ได้)
+                SYSTEM_DelayMs(100); 
+            }
+            // ------------------------------------
             
             // หน่วงเวลาเล็กน้อยหลังกดปุ่ม
-            SYSTEM_DelayMs(100);
+            //SYSTEM_DelayMs(100);
         }
 
         // B. วาดหน้าจอตามสถานะปัจจุบัน
@@ -886,6 +1107,261 @@ void Morse_App_Loop() {
                 Render_ScoreSummary(); 
                 break;
 
+			case STATE_PRACTICE_SEND: {
+                // 1. วาดหน้าจอ (Render)
+                if (reload_send_screen) {
+                    Render_SendPractice();
+                    reload_send_screen = false;
+                }
+
+                // 2. อ่านปุ่ม
+                KEY_Code_t key = KEYBOARD_Poll();
+
+                // 3. ปุ่ม EXIT
+                if (key == KEY_EXIT) {
+                    current_state = STATE_PRACTICE_SELECT;
+                    BK4819_EnterTxMute();
+                    BK4819_PlayTone(0, false);
+                    AUDIO_AudioPathOff();
+                    break;
+                }
+
+                uint32_t dot_len_ms = 1200 / setting_wpm;
+
+                // --- A. ปุ่ม 7 (Dot) / 9 (Dash) [ปรับปรุงใหม่: Blocking Loop] ---
+                if (key == KEY_7 || key == KEY_9) {
+                    // กำหนดค่าตามปุ่มที่กด
+                    uint32_t duration = (key == KEY_7) ? dot_len_ms : (dot_len_ms * 3);
+                    char symbol = (key == KEY_7) ? '.' : '-';
+
+                    // [สำคัญ] ใช้ do-while วนลูปตราบเท่าที่ยังกดปุ่มเดิมค้างไว้
+                    // จะทำให้จังหวะต่อเนื่อง ไหลลื่น เหมือน Keyer ของจริง
+                    do {
+                        // 1. Tone ON
+                        BK4819_PlayTone(setting_tone, true);
+                        BK4819_ExitTxMute();
+                        SYSTEM_DelayMs(duration); // ความยาวเสียงเป๊ะ
+
+                        // 2. Tone OFF
+                        BK4819_EnterTxMute();
+                        BK4819_PlayTone(0, false);
+
+                        // 3. เก็บข้อมูล
+                        if (strlen(send_buf) < 9) {
+                            int len = strlen(send_buf);
+                            send_buf[len] = symbol;
+                            send_buf[len+1] = '\0';
+                        }
+
+                        // 4. Gap (เว้นวรรคระหว่างเสียง)
+                        // ตรงนี้สำคัญ! การใส่ Delay ในลูปนี้ ทำให้ Gap เท่ากับ dot_len_ms เป๊ะๆ
+                        SYSTEM_DelayMs(dot_len_ms);
+
+                        // เช็คปุ่มซ้ำ (ถ้ายังกดค้าง ก็วนไปเล่นเสียงต่อไปทันที)
+                    } while (KEYBOARD_Poll() == key);
+
+                    // เมื่อปล่อยปุ่มแล้ว ให้รีเซ็ตตัวจับเวลา เพื่อรอตัดจบตัวอักษร
+                    key_timer = 0; 
+                }
+                
+                // --- B. ปุ่ม Side Key (Manual) - แบบ Blocking Loop ---
+                else if (key == KEY_SIDE2) {
+                    // >> เริ่มกดปุ่ม <<
+                    BK4819_PlayTone(setting_tone, true);
+                    BK4819_ExitTxMute();
+                    
+                    uint32_t press_duration = 0;
+                    
+                    // [สำคัญ] วนลูปอยู่ตรงนี้จนกว่าจะปล่อยมือ!
+                    // ไม่สนใจการวาดจอ ไม่สนใจอย่างอื่น สนแค่จับเวลา
+                    while (KEYBOARD_Poll() == KEY_SIDE2) {
+                        SYSTEM_DelayMs(5); // หน่วงเวลา 5ms เป๊ะๆ
+                        press_duration++;  // 1 หน่วย = 5ms
+                    }
+                    
+                    // >> ปล่อยปุ่มแล้ว <<
+                    BK4819_EnterTxMute();
+                    BK4819_PlayTone(0, false);
+                    
+                    // ตัดสินใจ Dot/Dash
+                    // Threshold: 120ms / 5ms = 24 หน่วย
+                    // ถ้ากดน้อยกว่า 24 (120ms) เป็น Dot, มากกว่าเป็น Dash
+                    if (strlen(send_buf) < 9) {
+                        if (press_duration < 24) { 
+                            strcat(send_buf, "."); 
+                        } else {
+                            strcat(send_buf, "-"); 
+                        }
+                    }
+                    
+                    key_timer = 0; // รีเซ็ตตัวนับ Gap เพราะเพิ่งปล่อยมือ
+                }
+                
+                // --- C. Logic ช่วงปล่อยมือ (Gap Detection) ---
+                // ส่วนนี้จะทำงานเฉพาะตอน "ไม่ได้กดปุ่มอะไรเลย"
+                else {
+                    key_timer++; // นับเวลา Gap ไปเรื่อยๆ
+                    
+                    // Gap Threshold: จบตัวอักษร
+                    // ประมาณ 300-400ms (70-80 หน่วย คูณ 5ms)
+                    if (key_timer > 25 && strlen(send_buf) > 0) {
+                        // 1. แปลผล
+                        char c = DecodeMorseStr(send_buf);
+                        
+                        // 2. เก็บลง History
+                        int hLen = strlen(send_history);
+                        if (hLen < 14) {
+                            send_history[hLen] = c;
+                            send_history[hLen+1] = '\0';
+                        } else {
+                            for(int i=0; i<14; i++) send_history[i] = send_history[i+1];
+                            send_history[13] = c;
+                        }
+                        
+                        // 3. ก๊อปปี้ไป Last Code Display [แก้แล้ว]
+                        strcpy(last_code_buf, send_buf);
+                        
+                        // 4. สั่งวาดจอ
+                        reload_send_screen = true; 
+                        
+                        // 5. เคลียร์ Buffer (เตรียมตัวต่อไป)
+                        memset(send_buf, 0, sizeof(send_buf));
+                        
+                        key_timer = 0; // หยุดนับ
+                    }
+                }
+
+                // หน่วงเวลาลูปหลัก (เพื่อให้ key_timer ของ Gap ทำงานแม่นยำประมาณหนึ่ง)
+                SYSTEM_DelayMs(5); 
+                break;
+			}
+			
+			case STATE_PRACTICE_ECHO: {
+                // 1. วาดหน้าจอ
+                if (reload_send_screen) {
+                    Render_PracticeEcho();
+                    reload_send_screen = false;
+                }
+
+                // 2. ใช้ปุ่มจาก Main Loop (ตัวแปร key ด้านบน) แทนการ Poll ใหม่!
+                // ลบ KEY_Code_t key = KEYBOARD_Poll(); ออกไปเลย
+                
+                // ไม่ต้องเช็ค KEY_EXIT ตรงนี้แล้ว (เพราะ HandleKeys จัดการเปลี่ยน state ให้แล้ว)
+                // ถ้า state เปลี่ยน มันจะ break loop ออกไปเอง
+
+				// ไม่ต้องเช็ค KEY_EXIT ตรงนี้แล้ว (เพราะ HandleKeys จัดการเปลี่ยน state ให้แล้ว)
+                // ถ้า state เปลี่ยน มันจะ break loop ออกไปเอง
+				
+                // 2. ปุ่ม EXIT -> ไปหน้าสรุปคะแนน (ใช้ STATE_GAME_RESULT แก้ขัดไปก่อน)
+/*                 if (key == KEY_EXIT) {
+                    // ส่งคะแนนไปหน้าสรุปผล
+                    score_correct = echo_score_correct;
+                    score_total = echo_score_total;
+                    is_time_up = false; // หลอกว่าเป็นโหมดปกติ
+                    quiz_cursor = 0; quiz_correct_index = 0; // ค่าหลอก
+                    
+                    // ไปหน้า Result
+                    current_state = STATE_GAME_SCORE; 
+                    
+                    BK4819_EnterTxMute();
+                    BK4819_PlayTone(0, false);
+                    AUDIO_AudioPathOff();
+                    break;
+                } */
+
+                uint32_t dot_len_ms = 1200 / setting_wpm;
+
+                // --- A. ปุ่ม 7/9 (Auto) ---
+                if (key == KEY_7 || key == KEY_9) {
+                    // ... (Copy โค้ดส่วนนี้จาก STATE_PRACTICE_SEND มาแปะได้เลยครับ เหมือนกันเป๊ะ) ...
+                    uint32_t duration = (key == KEY_7) ? dot_len_ms : (dot_len_ms * 3);
+                    char symbol = (key == KEY_7) ? '.' : '-';
+                    do {
+                        BK4819_PlayTone(setting_tone, true); BK4819_ExitTxMute();
+                        SYSTEM_DelayMs(duration);
+                        BK4819_EnterTxMute(); BK4819_PlayTone(0, false);
+                        if (strlen(send_buf) < 9) {
+                            int len = strlen(send_buf);
+                            send_buf[len] = symbol; send_buf[len+1] = '\0';
+                        }
+                        SYSTEM_DelayMs(dot_len_ms);
+                    } while (KEYBOARD_Poll() == key);
+                    key_timer = 0; 
+                }
+                
+                // --- B. Side Key (Manual) ---
+                else if (key == KEY_SIDE2) {
+                    // ... (Copy โค้ดส่วนนี้จาก STATE_PRACTICE_SEND มาแปะได้เลยครับ เหมือนกันเป๊ะ) ...
+                    BK4819_PlayTone(setting_tone, true); BK4819_ExitTxMute();
+                    uint32_t press_duration = 0;
+                    while (KEYBOARD_Poll() == KEY_SIDE2) {
+                        SYSTEM_DelayMs(5); press_duration++; 
+                    }
+                    BK4819_EnterTxMute(); BK4819_PlayTone(0, false);
+                    if (strlen(send_buf) < 9) {
+                        if (press_duration < 24) strcat(send_buf, "."); 
+                        else strcat(send_buf, "-"); 
+                    }
+                    key_timer = 0; 
+                }
+                
+                // --- C. ตรวจคำตอบ (Gap Detection) ---
+                else {
+                    key_timer++;
+                    
+                    // Gap Threshold (ประมาณ 350ms)
+                    if (key_timer > 35 && strlen(send_buf) > 0) {
+                        // 1. แปลผลสิ่งที่กดมา
+                        char c = DecodeMorseStr(send_buf);
+                        
+                        // 2. บันทึกผลเพื่อแสดงหน้าจอ
+                        echo_input_char = c;
+                        strcpy(echo_input_code, send_buf);
+                        
+                        // 3. ตรวจคำตอบ & นับคะแนน (เทียบกับ Target ปัจจุบันก่อน!)
+                        echo_score_total++;
+                        if (echo_input_char == echo_target_char) {
+                            echo_score_correct++;
+                            // (แถม) เสียงติ๊ดสั้นๆ ยืนยันว่าถูก
+                            BK4819_PlayTone(1200, true); BK4819_ExitTxMute();
+                            SYSTEM_DelayMs(100);
+                            BK4819_EnterTxMute(); BK4819_PlayTone(0, false);
+                        } else {
+                            // (แถม) เสียงทุ้มยืนยันว่าผิด
+                            BK4819_PlayTone(300, true); BK4819_ExitTxMute();
+                            SYSTEM_DelayMs(100);
+                            BK4819_EnterTxMute(); BK4819_PlayTone(0, false);
+                        }
+
+                        // 4. [สำคัญ] สั่งวาดจอ "ทันที" เพื่อโชว์ว่าถูกหรือผิด (ของข้อนี้)
+                        Render_PracticeEcho(); 
+
+                        // 5. หน่วงเวลาให้คนเล่นดูผลงานตัวเอง (เช่น 1 วินาที)
+                        SYSTEM_DelayMs(1000);
+                        
+                        // -----------------------------------------
+                        // เริ่มรอบใหม่ (Next Round)
+                        // -----------------------------------------
+
+                        // 6. สุ่มโจทย์ข้อใหม่
+                        int r = my_rand() % 42;
+                        echo_target_char = morse_table[r].character;
+                        
+                        // 7. ล้างค่า Input ทิ้ง (เพื่อให้หน้าจอแสดงเป็น [ ? ] รอรับค่าใหม่)
+                        echo_input_char = 0;
+                        memset(echo_input_code, 0, sizeof(echo_input_code));
+                        memset(send_buf, 0, sizeof(send_buf));
+                        
+                        // 8. สั่งให้วาดจอรอบหน้า (จะโชว์โจทย์ใหม่ และช่องว่าง)
+                        reload_send_screen = true; 
+                        
+                        key_timer = 0;
+                    }
+                }
+                SYSTEM_DelayMs(5);
+                break;
+			}
+			
             case STATE_SETTINGS:
                 Render_Settings();
                 break;
