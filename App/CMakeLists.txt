@@ -189,10 +189,12 @@ enable_feature(ENABLE_FEAT_F4HWN_GAME
 	app/snake.c
 	app/minesweeper.c
 	app/cw.c
-	app/matrix.c
-	app/rtttl.c
+	#app/matrix.c
+	#app/rtttl.c
 	app/motorcycle.c
 	app/morse.c
+	app/callsign.c
+	app/gps_app.c
 )
 enable_feature(ENABLE_FEAT_F4HWN_SCREENSHOT 
     screenshot.c
