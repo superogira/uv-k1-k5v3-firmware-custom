@@ -596,7 +596,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
             }
         #endif
         //APP_RunBreakout();
-        APP_RunLauncher();
+		APP_RunLauncher();
         return;
     }
     #endif
