@@ -1,37 +1,42 @@
 #include "app/launcher.h"
-#include "app/breakout.h"
-#include "app/snake.h"
-#include "app/minesweeper.h"
+//#include "app/breakout.h"
+//#include "app/snake.h"
+//#include "app/minesweeper.h"
 #include "app/cw.h"
 //#include "app/matrix.h"
 //#include "app/rtttl.h"
-#include "app/motorcycle.h"
+//#include "app/motorcycle.h"
 #include "app/morse.h"
 #include "app/callsign.h"
 #include "app/gps_app.h"
+#include "app/app_aprs.h"
+//#include "app/thai_test.h"
 
 #include "driver/keyboard.h"
 #include "driver/st7565.h"
 #include "driver/bk4819.h"
+#include "driver/system.h"
 #include "ui/helper.h"
 #include "settings.h" 
 #include <string.h> 
+#include <stdio.h>
 
 // --- Config ---
-#define MAX_ITEMS 8
+#define MAX_ITEMS /
 #define ITEMS_PER_PAGE 4 // โชว์ได้ทีละ 4 บรรทัด (เต็มจอพอดี)
 
 static const char* menuItems[MAX_ITEMS] = {
+	"GPS & APRS",
 	"CW TX/RX",
 	"CW Trainer",
-	"Callsign Country Lookup",
-	"GPS & GRID",
-	"Breakout",
-	"Minesweeper",
-	"Snake",
+	"Callsign Country Lookup"
+	//"thai test",
+	//"Breakout",
+	//"Minesweeper",
+	//"Snake"
 	//"Matrix",
 	//"Music Player",
-	"Motorcycle"
+	//"Motorcycle"
 };
 
 // --- Variables ---
@@ -133,16 +138,17 @@ void APP_RunLauncher(void) {
         }
         else if (key == KEY_MENU || key == KEY_5) {
             switch(selectedIndex) {
-                case 0: APP_RunCW(); break;
-				case 1: Morse_App_Loop(); break;
-				case 2: APP_RunCallSign(); break;
-				case 3: APP_RunGPS(); break;
-                case 4: APP_RunBreakout(); break;
-                case 5: APP_RunMinesweeper(); break;
-                case 6: APP_RunSnake(); break;
+				case 0: APP_RunGPS(); break;
+                case 1: APP_RunCW(); break;
+				case 2: Morse_App_Loop(); break;
+				case 3: APP_RunCallSign(); break;
+				//case 4: APP_ThaiTest_HandleKeys(); break;
+                //case 4: APP_RunBreakout(); break;
+                //case 5: APP_RunMinesweeper(); break;
+                //case 6: APP_RunSnake(); break;
 				//case 7: APP_RunMatrix(); break;
 				//case 8: APP_RunRTTTL(); break;
-				case 7: APP_RunMotorcycle(); break;
+				//case 7: APP_RunMotorcycle(); break;
             }
             
             UI_DisplayClear();
