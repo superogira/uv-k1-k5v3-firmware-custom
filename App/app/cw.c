@@ -1,12 +1,15 @@
 #include "app/cw.h"
-#include "app/breakout.h"
 #include "driver/bk4819.h"
+#include "driver/st7565.h"
 #include "driver/system.h"
+#include "driver/keyboard.h"
 #include "driver/gpio.h" 
 #include "settings.h"
 #include "../audio.h" 
 #include "../radio.h" 
+#include "ui/helper.h"
 #include <string.h>
+#include <stdio.h>
 
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
 #include "screenshot.h"
@@ -87,6 +90,7 @@ static int GetTotalActivePages() {
     return 1; 
 }
 
+/*
 static char DecodeMorse(const char* code) {
     if (strcmp(code, ".-") == 0) return 'A';
     if (strcmp(code, "-...") == 0) return 'B';
@@ -134,6 +138,42 @@ static char DecodeMorse(const char* code) {
 	if (strcmp(code, "..--..") == 0) return '?';
 	
     return '?'; 
+}
+*/
+
+// Lookup table: {morse_code, character}
+static const struct {
+    const char* code;
+    char ch;
+} morse_table[] = {
+    // Letters A-Z
+    {".-", 'A'}, {"-...", 'B'}, {"-.-.", 'C'}, {"-..", 'D'},
+    {".", 'E'}, {"..-.", 'F'}, {"--.", 'G'}, {"....", 'H'},
+    {"..", 'I'}, {".---", 'J'}, {"-.-", 'K'}, {".-..", 'L'},
+    {"--", 'M'}, {"-.", 'N'}, {"---", 'O'}, {".--.", 'P'},
+    {"--.-", 'Q'}, {".-.", 'R'}, {"...", 'S'}, {"-", 'T'},
+    {"..-", 'U'}, {"...-", 'V'}, {".--", 'W'}, {"-..-", 'X'},
+    {"-.--", 'Y'}, {"--..", 'Z'},
+    
+    // Numbers 0-9
+    {".----", '1'}, {"..---", '2'}, {"...--", '3'}, {"....-", '4'},
+    {".....", '5'}, {"-....", '6'}, {"--...", '7'}, {"---..", '8'},
+    {"----.", '9'}, {"-----", '0'},
+    
+    // Special characters
+    {"----", '_'}, {".-.-.-", '.'}, {"-...-", '='}, {"--..--", ','},
+    {"-..-.", '/'}, {"..--..", '?'},
+    
+    {NULL, '\0'} // Terminator
+};
+
+static char DecodeMorse(const char* code) {
+    for (int i = 0; morse_table[i].code != NULL; i++) {
+        if (strcmp(code, morse_table[i].code) == 0) {
+            return morse_table[i].ch;
+        }
+    }
+    return '?'; // Unknown code
 }
 
 static void AppendChar(char c) {
@@ -186,7 +226,7 @@ static void Draw() {
     }
 
     char freqStr[32];
-    sprintf(freqStr, "%u.%04u %s %s", freq / 100000, (freq % 100000) / 10, modStr, bwStr);
+	sprintf(freqStr, "%lu.%05lu %s %s", freq / 100000, freq % 100000, modStr, bwStr);
     UI_PrintStringSmallBold(freqStr, 2, 0, 0);
 
     UI_DrawRectangleBuffer(gFrameBuffer, 0, 10, 127, 11, true);
@@ -212,7 +252,7 @@ static void Draw() {
 
     // แสดงเลขหน้า
     int displayNum = viewPage - (3 - totalPages) + 1;
-    char pageStr[16];
+    char pageStr[32];
     sprintf(pageStr, "%d/%d", displayNum, totalPages);
     GUI_DisplaySmallest(pageStr, 108, 13, false, true);
 
@@ -236,6 +276,14 @@ static void Draw() {
     int rxWpm = 1200 / dotLen;
     sprintf(spd, "TX:%d RX:%d", txWpm, rxWpm);
     GUI_DisplaySmallest(spd, 62, 44, false, true);
+
+	uint8_t pwr = gEeprom.VfoInfo[gEeprom.TX_VFO].OUTPUT_POWER;
+    char pwrStr[16];
+    if (pwr >= 1 && pwr <= 5) sprintf(pwrStr, "Pow:L%d", pwr);
+    else if (pwr == 6) strcpy(pwrStr, "Pow:M");
+    else if (pwr == 7) strcpy(pwrStr, "Pow:H");
+    else strcpy(pwrStr, "Pow:L"); // เผื่อกรณีค่าเป็น 0
+	GUI_DisplaySmallest(pwrStr, 105, 44, false, true);
 
     UI_DrawRectangleBuffer(gFrameBuffer, 1, 55, 25 + (currentRSSI/4), 60, true);
     
@@ -363,8 +411,27 @@ void APP_RunCW(void) {
             key1WasPressed = false;
         }
 
+		if (key == KEY_6) {
+             uint8_t *pwr = &gEeprom.VfoInfo[gEeprom.TX_VFO].OUTPUT_POWER;
+             (*pwr)++;
+             if (*pwr > 7) *pwr = 1; // วนลูป 1->7->1 (L1-H)
+             
+             // อัปเดตค่าไปยัง Hardware และคำนวณ Bias ใหม่
+             RADIO_ConfigureSquelchAndOutputPower(&gEeprom.VfoInfo[gEeprom.TX_VFO]);
+             
+             Draw(); // วาดหน้าจอใหม่เพื่ออัปเดตสถานะ
+             SYSTEM_DelayMs(200); // หน่วงเวลา
+        }
+
+        // [ADD 2] อ่านค่าจาก Paddle (ADC)
+        // 0=None, 1=Dot, 2=Dash
+        int paddleState = ReadPaddleADC();
+        
+        bool triggerDot  = (key == KEY_7) || (paddleState == 1);
+        bool triggerDash = (key == KEY_9) || (paddleState == 2);
+		
         // --- CW Sending Logic ---
-        if (key == KEY_7 || key == KEY_9) {
+        if (triggerDot || triggerDash) {
             if (!txMode) {
                 TX_Start();
                 txMode = true;
@@ -375,12 +442,14 @@ void APP_RunCW(void) {
             TX_Key(true);
             
             if(symbolCount < 7) {
-                symbolBuf[symbolCount++] = (key == KEY_7) ? '.' : '-';
+                //symbolBuf[symbolCount++] = (key == KEY_7) ? '.' : '-';
+				symbolBuf[symbolCount++] = triggerDot ? '.' : '-';
             }
             
             lastTxTime = 0; 
 
-            int duration = (key == KEY_7) ? txDotLen : (txDotLen * 3);
+            //int duration = (key == KEY_7) ? txDotLen : (txDotLen * 3);
+			int duration = triggerDot ? txDotLen : (txDotLen * 3);
             SYSTEM_DelayMs(duration);
             
             TX_Key(false);
@@ -430,12 +499,12 @@ void APP_RunCW(void) {
             }
             if (key == KEY_UP || key == KEY_DOWN) {
                 if (key == lastKey) keyHoldCounter++; else { keyHoldCounter = 0; lastKey = key; }
-                int step = 10; int throttle = 10;
-                if (keyHoldCounter > 100) { step = 1000; throttle = 6; }
-                else if (keyHoldCounter > 80) { step = 500; throttle = 8; }
-                else if (keyHoldCounter > 60) { step = 200; throttle = 10; }
-                else if (keyHoldCounter > 40) { step = 100; throttle = 15; }
-                else if (keyHoldCounter > 20) { step = 50; throttle = 20; }
+                int step = 1; int throttle = 10;
+                if (keyHoldCounter > 100) { step = 500; throttle = 8; }
+                else if (keyHoldCounter > 80) { step = 200; throttle = 10; }
+                else if (keyHoldCounter > 60) { step = 100; throttle = 15; }
+                else if (keyHoldCounter > 40) { step = 50; throttle = 20; }
+                else if (keyHoldCounter > 20) { step = 10; throttle = 30; }
                 if (keyHoldCounter == 0 || (keyHoldCounter > 15 && keyHoldCounter % throttle == 0)) {
                     uint32_t *freq = &gEeprom.VfoInfo[gEeprom.TX_VFO].pRX->Frequency;
                     if (key == KEY_UP) *freq -= step; else *freq += step;
@@ -502,4 +571,5 @@ void APP_RunCW(void) {
     if(txMode) TX_Stop(); 
     BK4819_SetAF(BK4819_AF_MUTE); 
     AUDIO_AudioPathOff();         
+
 }
