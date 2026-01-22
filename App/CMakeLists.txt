@@ -196,6 +196,12 @@ enable_feature(ENABLE_FEAT_F4HWN_GAME
 	# app/callsign.c
 	app/gps_app.c
 	app/app_aprs.c
+	# app/thai_test.c
+	# app/aprs_hw_decoder.c
+	# app/pinscan.c
+	# app/edgeprobe.c
+	# app/uartmon.c
+	# app/raw_serial.c
 )
 enable_feature(ENABLE_FEAT_F4HWN_SCREENSHOT 
     screenshot.c
