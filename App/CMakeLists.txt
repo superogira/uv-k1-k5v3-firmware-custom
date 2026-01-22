@@ -193,7 +193,7 @@ enable_feature(ENABLE_FEAT_F4HWN_GAME
 	#app/rtttl.c
 	# app/motorcycle.c
 	app/morse.c
-	app/callsign.c
+	# app/callsign.c
 	app/gps_app.c
 	app/app_aprs.c
 )
