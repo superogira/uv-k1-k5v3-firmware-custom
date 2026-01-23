@@ -18,7 +18,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   Serial.begin(115200);
   GPS_Serial.begin(9600, SERIAL_8N1, RX_PIN_GPS, TX_PIN_GPS);
-  Radio_Serial.begin(9600, SERIAL_8N1, RX_PIN_RADIO, TX_PIN_RADIO);
+  Radio_Serial.begin(38400, SERIAL_8N1, RX_PIN_RADIO, TX_PIN_RADIO);
 }
 
 void loop() {
