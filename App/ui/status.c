@@ -114,7 +114,7 @@ void UI_DisplayStatus()
                     const char *name = gListName[gEeprom.SCAN_LIST_DEFAULT - 1];
 
                     // Check if name is valid
-                    bool nameValid = (name[0] != '\0' && name[0] != '\xff' && name[0] != ' ');
+                    bool nameValid = (name[0] != '\0' && name[0] != '\xff');
 
                     // Format the string
                     if (nameValid) {

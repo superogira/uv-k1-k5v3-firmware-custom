@@ -976,7 +976,7 @@ void UI_DisplayMain(void)
                         const char *name = gListName[countList - 1];
                         
                         // If name is empty/invalid, display number
-                        if (name[0] == '\0' || name[0] == '\xff' || name[0] == ' ') {
+                        if (name[0] == '\0' || name[0] == '\xff') {
                             sprintf(String, "%02d", countList);
                             xStart = 117;  // 2-digit number aligned right
                             xDisplay = 119;
