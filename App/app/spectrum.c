@@ -1667,6 +1667,12 @@ static void UpdateListening()
 
 static void Tick()
 {
+#ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
+    // Parse incoming packets on every tick so serial keys are never missed,
+    // regardless of whether the screen needs redrawing.
+    SCREENSHOT_ParseInput();
+#endif
+
     if (gNextTimeslice)
     {
         gNextTimeslice = false;
@@ -1737,7 +1743,7 @@ static void Tick()
         Render();
         // For screenshot
         #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
-            getScreenShot(false);
+            SCREENSHOT_Update(false);
         #endif
         redrawScreen = false;
     }

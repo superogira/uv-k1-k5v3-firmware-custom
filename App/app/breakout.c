@@ -484,7 +484,7 @@ void APP_RunBreakout(void) {
 
                     // For screenshot
                     #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
-                        getScreenShot(false);
+                        SCREENSHOT_Update(false);
                     #endif
                 }
                 

@@ -1406,7 +1406,7 @@ void APP_TimeSlice10ms(void)
 
     #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
     if (gUpdateDisplayCurrent || gUpdateStatusCurrent) {
-        getScreenShot(false);
+        SCREENSHOT_Update(false);
     }
     #endif
 
