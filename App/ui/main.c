@@ -235,7 +235,7 @@ void UI_DisplayAudioBar(void)
 
 #ifdef ENABLE_FEAT_F4HWN_AUDIO_SCOPE
 
-#define SCOPE_SAMPLES   42
+#define SCOPE_SAMPLES   43
 
 static uint16_t g_scope_buf[SCOPE_SAMPLES];
 static uint8_t  g_scope_write = 0;
@@ -245,8 +245,6 @@ void UI_AudioScope_AddSample(void)
 {
     // REG_64 (VoiceAmplitudeOut) is only meaningful in TX (mic input).
     // FM RX audio is frequency-encoded — no register gives the instantaneous waveform.
-    if (gCurrentFunction != FUNCTION_TRANSMIT)
-        return;
 
     const uint16_t value = BK4819_GetVoiceAmplitudeOut();
     g_scope_buf[g_scope_write] = value;
@@ -258,15 +256,6 @@ void UI_DisplayAudioScope(void)
     if (gLowBattery && !gLowBatteryConfirmed)
         return;
 
-#ifdef ENABLE_FEAT_F4HWN
-    RxBlinkLed = 0;
-    RxBlinkLedCounter = 0;
-    BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
-    const unsigned int line = isMainOnly() ? 5 : 3;
-#else
-    const unsigned int line = 3;
-#endif
-
     if (gScreenToDisplay != DISPLAY_MAIN
 #ifdef ENABLE_DTMF_CALLING
         || gDTMF_CallState != DTMF_CALL_STATE_NONE
@@ -277,6 +266,15 @@ void UI_DisplayAudioScope(void)
 #if defined(ENABLE_ALARM) || defined(ENABLE_TX1750)
     if (gAlarmState != ALARM_STATE_OFF)
         return;
+#endif
+
+#ifdef ENABLE_FEAT_F4HWN
+    RxBlinkLed = 0;
+    RxBlinkLedCounter = 0;
+    BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
+    const unsigned int line = isMainOnly() ? 5 : 3;
+#else
+    const unsigned int line = 3;
 #endif
 
     uint8_t *p_line = gFrameBuffer[line];
@@ -1563,7 +1561,7 @@ void UI_DisplayMain(void)
         const bool rx = FUNCTION_IsRx();
 
 #ifdef ENABLE_FEAT_F4HWN_AUDIO_SCOPE
-        if (gCurrentFunction == FUNCTION_TRANSMIT) {
+        if (gSetting_mic_bar && gCurrentFunction == FUNCTION_TRANSMIT) {
             // Reserve the line so no other element overwrites it.
             // Actual drawing is handled exclusively by the app.c timeslice.
             center_line = CENTER_LINE_AUDIO_SCOPE;
