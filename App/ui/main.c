@@ -265,6 +265,9 @@ void UI_DisplayAudioScope(void)
 #ifdef ENABLE_VOX
     && !gEeprom.VOX_SWITCH
 #endif
+#ifdef ENABLE_FEAT_F4HWN
+    && !gSetting_set_ptt_session
+#endif
     )
     return;
 
